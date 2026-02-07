@@ -1,0 +1,28 @@
+name: build
+on:
+  push:
+jobs:
+  build-ProxyBK_DialogLoader:
+    runs-on: ubuntu-22.04
+    name: Build ProxyBK_DialogLoader
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          submodules: recursive
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+      - name: Build
+        run: make -j$(nproc)
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProxyBK_DialogLoader
+          path: |
+            ProxyBK_DialogLoader*.so
+            ProxyBK_DialogLoader*.dll
+            ProxyBK_DialogLoader*.dylib
+            icon.png
+            manifest.json
+            README.md

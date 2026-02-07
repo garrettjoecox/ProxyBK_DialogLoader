@@ -1,0 +1,11 @@
+*.d
+*.o
+*.so
+*.elf
+*.bin
+*.exe
+*.dll
+*.lib
+*.dylib
+*.pdb
+*.exp
