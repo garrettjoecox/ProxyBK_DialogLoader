@@ -104,16 +104,18 @@ std::vector<uint8_t> ConvertDialogToBytes(const Dialog& dialog) {
     out.push_back(static_cast<uint8_t>(dialog.bottom.size()));
     for (const auto& text : dialog.bottom) {
         out.push_back(text.cmd);
-        out.push_back(static_cast<uint8_t>(text.string.size()));
+        out.push_back(static_cast<uint8_t>(text.string.size() + 1)); // +1 for null terminator
         out.insert(out.end(), text.string.begin(), text.string.end());
+        out.push_back(0x00);
     }
     
     // Top texts
     out.push_back(static_cast<uint8_t>(dialog.top.size()));
     for (const auto& text : dialog.top) {
         out.push_back(text.cmd);
-        out.push_back(static_cast<uint8_t>(text.string.size()));
+        out.push_back(static_cast<uint8_t>(text.string.size() + 1)); // +1 for null terminator
         out.insert(out.end(), text.string.begin(), text.string.end());
+        out.push_back(0x00);
     }
     
     // Pad to 4-byte alignment for endianness swap
@@ -139,7 +141,7 @@ void RefreshDialog(int32_t textId) {
     std::string fileName = ss.str() + ".dialog";
     fs::path filePath = MOD_FOLDER_PATH / "DialogLoader" / "dialog" / fileName;
     if (!fs::exists(filePath)) return;
-
+ 
     try {
         Dialog dialog = LoadDialogFromPath(filePath.string());
         std::vector<uint8_t> binary = ConvertDialogToBytes(dialog);
