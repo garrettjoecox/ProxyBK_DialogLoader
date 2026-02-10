@@ -15,6 +15,7 @@ fs::path MOD_FOLDER_PATH;
 
 std::unordered_map<int32_t, std::array<uint8_t, 0x1000>> dialogMap;
 std::unordered_map<int32_t, std::array<uint8_t, 0x1000>> quizQMap;
+std::unordered_map<int32_t, std::array<uint8_t, 0x1000>> gruntyQMap;
 
 struct BKString {
     uint8_t cmd;
@@ -97,24 +98,89 @@ static Dialog LoadDialogFromPath(const std::string& path) {
     return result;
 }
 
+static std::vector<uint8_t> ConvertUTF8ToLatin1(const std::vector<uint8_t>& input) {
+    std::vector<uint8_t> result;
+    
+    for (size_t i = 0; i < input.size(); ++i) {
+        uint8_t byte = input[i];
+        
+        // ASCII range (0x00-0x7F): pass through as-is
+        if (byte < 0x80) {
+            result.push_back(byte);
+        }
+        // UTF-8 2-byte sequence for Latin-1 supplement (0xC2-0xC3)
+        else if ((byte == 0xC2 || byte == 0xC3) && i + 1 < input.size()) {
+            uint8_t next_byte = input[i + 1];
+            
+            // Validate that it's a valid UTF-8 continuation byte (0x80-0xBF)
+            if ((next_byte & 0xC0) == 0x80) {
+                // Decode UTF-8 to Unicode code point
+                uint32_t codepoint = ((byte & 0x1F) << 6) | (next_byte & 0x3F);
+                
+                // Code points 0x80-0xFF map directly to ISO-8859-1
+                if (codepoint >= 0x80 && codepoint <= 0xFF) {
+                    result.push_back(static_cast<uint8_t>(codepoint));
+                    i++; // Skip the continuation byte
+                } else {
+                    // Shouldn't happen with 0xC2-0xC3, but handle gracefully
+                    result.push_back('?'); // Replacement character
+                    i++;
+                }
+            } else {
+                // Invalid UTF-8 sequence
+                result.push_back('?');
+            }
+        }
+        // UTF-8 3+ byte sequences: not representable in ISO-8859-1
+        else if ((byte & 0xE0) == 0xC0) {
+            // 2-byte sequence but not Latin-1 range
+            result.push_back('?');
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) {
+                i++; // Skip continuation byte
+            }
+        }
+        else if ((byte & 0xF0) == 0xE0) {
+            // 3-byte sequence
+            result.push_back('?');
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) i++;
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) i++;
+        }
+        else if ((byte & 0xF8) == 0xF0) {
+            // 4-byte sequence
+            result.push_back('?');
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) i++;
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) i++;
+            if (i + 1 < input.size() && (input[i + 1] & 0xC0) == 0x80) i++;
+        }
+        else {
+            // Invalid UTF-8 or continuation byte in wrong position
+            result.push_back('?');
+        }
+    }
+    
+    return result;
+}
+
 std::vector<uint8_t> ConvertDialogToBytes(const Dialog& dialog) {
     std::vector<uint8_t> out = {0x01, 0x03, 0x00};
     
     // Bottom texts
     out.push_back(static_cast<uint8_t>(dialog.bottom.size()));
     for (const auto& text : dialog.bottom) {
+        std::vector<uint8_t> converted = ConvertUTF8ToLatin1(text.string);
         out.push_back(text.cmd);
-        out.push_back(static_cast<uint8_t>(text.string.size() + 1)); // +1 for null terminator
-        out.insert(out.end(), text.string.begin(), text.string.end());
+        out.push_back(static_cast<uint8_t>(converted.size() + 1)); // +1 for null terminator
+        out.insert(out.end(), converted.begin(), converted.end());
         out.push_back(0x00);
     }
     
     // Top texts
     out.push_back(static_cast<uint8_t>(dialog.top.size()));
     for (const auto& text : dialog.top) {
+        std::vector<uint8_t> converted = ConvertUTF8ToLatin1(text.string);
         out.push_back(text.cmd);
-        out.push_back(static_cast<uint8_t>(text.string.size() + 1)); // +1 for null terminator
-        out.insert(out.end(), text.string.begin(), text.string.end());
+        out.push_back(static_cast<uint8_t>(converted.size() + 1)); // +1 for null terminator
+        out.insert(out.end(), converted.begin(), converted.end());
         out.push_back(0x00);
     }
     
@@ -137,11 +203,25 @@ void RefreshDialog(int32_t textId) {
 
     // Convert textId to hex string for filename (padded to 4 chars)
     std::stringstream ss;
-    ss << std::hex << std::setw(4) << std::setfill('0') << textId;
+    ss << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << textId;
     std::string fileName = ss.str() + ".dialog";
-    fs::path filePath = MOD_FOLDER_PATH / "DialogLoader" / "dialog" / fileName;
-    if (!fs::exists(filePath)) return;
- 
+    
+    fs::path dialogPath = MOD_FOLDER_PATH / "DialogLoader" / "dialog";
+    if (!fs::exists(dialogPath)) return;
+    
+    // Recursively search for the file
+    fs::path filePath;
+    bool found = false;
+    for (const auto& entry : fs::recursive_directory_iterator(dialogPath)) {
+        if (entry.is_regular_file() && entry.path().filename() == fileName) {
+            filePath = entry.path();
+            found = true;
+            break;
+        }
+    }
+    
+    if (!found) return;
+
     try {
         Dialog dialog = LoadDialogFromPath(filePath.string());
         std::vector<uint8_t> binary = ConvertDialogToBytes(dialog);
@@ -171,7 +251,7 @@ DLLEXPORT void DialogLoader_RefreshAll(uint8_t* rdram, recomp_context* ctx) {
         fs::create_directories(dialogPath);
     }
 
-    for (const auto& entry : fs::directory_iterator(dialogPath)) {
+    for (const auto& entry : fs::recursive_directory_iterator(dialogPath)) {
         if (!entry.is_regular_file()) continue;
         fs::path filePath = entry.path();
         if (filePath.extension() != ".dialog") continue;

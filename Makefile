@@ -1,5 +1,5 @@
 ZIG = zig c++
-TARGET = ProxyBK_DialogLoader002
+TARGET = ProxyBK_DialogLoader003
 CXXFLAGS = -shared -fPIC -I ./include
 
 all: linux windows macos
